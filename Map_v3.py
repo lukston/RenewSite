@@ -21,7 +21,7 @@ st.title("🎯 Germany Score Map (0–100 Scale)")
 # --- Auto-Download GeoTIFF from GitHub ---
 @st.cache_resource
 def download_and_generate_score_tif():
-    url = "https://github.com/lukston/RenewSite/blob/main/simulated_germany_wind_speed.tif"  # ✅ <--- HIER ANPASSEN
+    url = "https://raw.githubusercontent.com/lukston/RenewSite/refs/heads/main/simulated_germany_wind_speed.tif"  # ✅ <--- HIER ANPASSEN
 
     response = requests.get(url)
     response.raise_for_status()
