@@ -7,3 +7,6 @@ matplotlib
 rasterio
 shapely
 branca
+pandas
+altair
+seaborn
