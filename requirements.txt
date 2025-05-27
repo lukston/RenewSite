@@ -10,3 +10,4 @@ branca
 pandas
 altair
 seaborn
+xlsxwriter
