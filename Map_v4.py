@@ -14,6 +14,7 @@ import altair as alt
 from folium.raster_layers import ImageOverlay
 from tempfile import NamedTemporaryFile
 from folium.plugins import Draw
+import requests
 
 st.set_page_config(layout="wide")
 sns.set_style("white")
@@ -41,28 +42,18 @@ after_tax_cost_of_debt = cost_of_debt * (1 - tax_rate / 100)
 wacc = equity_ratio * cost_of_equity + debt_ratio * after_tax_cost_of_debt
 wacc = max(wacc, 0)
 
-# Upload
-if "tiffs_uploaded" not in st.session_state:
-    st.session_state.tiffs_uploaded = False
+# Download files from GitHub
+def download_file(url):
+    response = requests.get(url)
+    tmp = NamedTemporaryFile(delete=False, suffix=".tif")
+    tmp.write(response.content)
+    return tmp.name
 
-if not st.session_state.tiffs_uploaded:
-    st.title("📁 Upload Wind Data GeoTIFFs")
-    wind_file = st.file_uploader("Wind Speed TIFF", type=["tif", "tiff"])
-    air_file = st.file_uploader("Air Density TIFF", type=["tif", "tiff"])
-    if wind_file and air_file:
-        def save_file(uploaded_file):
-            with NamedTemporaryFile(delete=False, suffix=".tif") as tmp:
-                tmp.write(uploaded_file.read())
-                return tmp.name
-        st.session_state.wind_path = save_file(wind_file)
-        st.session_state.air_path = save_file(air_file)
-        st.session_state.tiffs_uploaded = True
-        st.rerun()
-    else:
-        st.stop()
+wind_url = "https://raw.githubusercontent.com/lukston/RenewSite/main/data/wind.tif"
+air_url = "https://raw.githubusercontent.com/lukston/RenewSite/main/data/air.tif"
 
-wind_path = st.session_state.wind_path
-air_path = st.session_state.air_path
+wind_path = download_file(wind_url)
+air_path = download_file(air_url)
 
 # Raster loading
 def load_rasters(wind, air):
@@ -101,7 +92,6 @@ colormap = linear.viridis.scale(vmin, vmax)
 colormap.caption = 'Wind Speed (m/s)'
 colormap.add_to(map_obj)
 
-# Tooltip circles (invisible)
 for i in range(0, wind_data.shape[0], 50):
     for j in range(0, wind_data.shape[1], 50):
         val = wind_data[i, j]
