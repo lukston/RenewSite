@@ -19,6 +19,24 @@ import requests
 st.set_page_config(layout="wide")
 sns.set_style("white")
 
+# Google Drive download helper
+def gdrive_download(file_id):
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    response = requests.get(url)
+    if not response.ok:
+        st.error(f"Failed to download from Google Drive ID: {file_id}")
+        st.stop()
+    tmp = NamedTemporaryFile(delete=False, suffix=".tif")
+    tmp.write(response.content)
+    return tmp.name
+
+# Google Drive File IDs
+WIND_FILE_ID = "1cEMvR4O4Z2m6TyLXGxccoho0T7SL9_Pg"
+AIR_FILE_ID = "1IEympzffE3LZMMl1Hqs-HqGm2cQ9JokA"
+
+wind_path = gdrive_download(WIND_FILE_ID)
+air_path = gdrive_download(AIR_FILE_ID)
+
 # Sidebar
 st.sidebar.header("📈 Financial Assumptions")
 unlevered_beta = st.sidebar.number_input("Unlevered Beta", 0.0, 5.0, 0.8)
@@ -41,19 +59,6 @@ cost_of_equity = risk_free_rate + levered_beta * market_risk_premium
 after_tax_cost_of_debt = cost_of_debt * (1 - tax_rate / 100)
 wacc = equity_ratio * cost_of_equity + debt_ratio * after_tax_cost_of_debt
 wacc = max(wacc, 0)
-
-# Download files from GitHub
-def download_file(url):
-    response = requests.get(url)
-    tmp = NamedTemporaryFile(delete=False, suffix=".tif")
-    tmp.write(response.content)
-    return tmp.name
-
-wind_url = "https://raw.githubusercontent.com/lukston/RenewSite/main/data/wind.tif"
-air_url = "https://raw.githubusercontent.com/lukston/RenewSite/main/data/air.tif"
-
-wind_path = download_file(wind_url)
-air_path = download_file(air_url)
 
 # Raster loading
 def load_rasters(wind, air):
