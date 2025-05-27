@@ -15,6 +15,7 @@ from folium.raster_layers import ImageOverlay
 from tempfile import NamedTemporaryFile
 from folium.plugins import Draw
 import requests
+from io import BytesIO
 
 st.set_page_config(layout="wide")
 sns.set_style("white")
@@ -187,7 +188,16 @@ with tab2:
         ).properties(width=900, height=400)
 
         st.altair_chart(chart, use_container_width=True)
+
         st.subheader("📋 Full Financial Table")
         st.dataframe(df)
+
+        # Download buttons
         csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("Download CSV", data=csv, file_name="financials.csv")
+        st.download_button("📄 Download CSV", data=csv, file_name="financials.csv", mime="text/csv")
+
+        excel_buffer = BytesIO()
+        df.to_excel(excel_buffer, index=False, engine="xlsxwriter")
+        excel_data = excel_buffer.getvalue()
+        st.download_button("📊 Download Excel", data=excel_data, file_name="financials.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
