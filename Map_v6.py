@@ -192,11 +192,23 @@ with score_tab:
     st.title("📍 Site Suitability Based on Wind Speed × Air Density")
     site_score_data = wind_data * air_data
 
-    # Load and rasterize restricted areas
+    # Load and buffer restricted areas using projected CRS
     restricted_gdf = gpd.read_file(restricted_path).to_crs(crs)
-    shapes = [(geom, 1) for geom in restricted_gdf.geometry]
+
+    # Project to metric CRS for accurate buffering
+    projected_crs = restricted_gdf.estimate_utm_crs()
+    restricted_proj = restricted_gdf.to_crs(projected_crs)
+
+    # Buffer around city centroids (e.g. 5 km)
+    restricted_proj["geometry"] = restricted_proj.centroid.buffer(5000)
+
+    # Reproject buffered geometries back to raster CRS
+    restricted_buffered = restricted_proj.to_crs(crs)
+
+    # Rasterize mask and apply it
+    shapes = [(geom, 1) for geom in restricted_buffered.geometry]
     mask_array = rasterize(shapes, out_shape=site_score_data.shape, transform=transform, fill=0, dtype="uint8")
-    site_score_data[mask_array == 1] = 0  # Apply restriction
+    site_score_data[mask_array == 1] = 0
 
     score_img_path, score_vmin, score_vmax = create_overlay(site_score_data)
     site_map = folium.Map(location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()], zoom_start=6, tiles="cartodbpositron")
