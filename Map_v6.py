@@ -200,7 +200,7 @@ with score_tab:
     restricted_proj = restricted_gdf.to_crs(projected_crs)
 
     # Buffer around city centroids (e.g. 5 km)
-    restricted_proj["geometry"] = restricted_proj.centroid.buffer(3000)
+    restricted_proj["geometry"] = restricted_proj.centroid.buffer(4000)
 
     # Reproject buffered geometries back to raster CRS
     restricted_buffered = restricted_proj.to_crs(crs)
