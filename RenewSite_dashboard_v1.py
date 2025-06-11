@@ -1,10 +1,11 @@
+from shapely.geometry import mapping
 import streamlit as st
 import folium
 import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.mask import mask
-from shapely.geometry import shape, mapping
+from shapely.geometry import shape
 from branca.colormap import linear
 from streamlit_folium import st_folium
 import matplotlib.pyplot as plt
@@ -13,7 +14,6 @@ import altair as alt
 from folium.raster_layers import ImageOverlay
 from tempfile import NamedTemporaryFile
 from folium.plugins import Draw
-from rasterio.features import rasterize
 from io import BytesIO
 import requests
 
@@ -114,11 +114,9 @@ def gdrive_download(file_id: str, suffix: str) -> str:
 # Replace these IDs if your Drive files change; they must be “Anyone with link can view”
 WIND_FILE_ID       = "1cEMvR4O4Z2m6TyLXGxccoho0T7SL9_Pg"
 AIR_FILE_ID        = "1IEympzffE3LZMMl1Hqs-HqGm2cQ9JokA"
-RESTRICTED_FILE_ID = "1No-TTcys7wJl_GqPtTnEGTxvxVg_Tlb-"
 
 wind_path       = gdrive_download(WIND_FILE_ID, ".tif")
 air_path        = gdrive_download(AIR_FILE_ID, ".tif")
-restricted_path = gdrive_download(RESTRICTED_FILE_ID, ".geojson")
 
 
 # ------------------ Sidebar Inputs ------------------
@@ -183,7 +181,9 @@ def load_rasters(wind_file: str, air_file: str):
     germany = gpd.read_file(
         "https://raw.githubusercontent.com/johan/world.geo.json/master/countries/DEU.geo.json"
     )
+    germany = germany.to_crs("EPSG:25832")  # Use UTM Zone 32N for Germany
     with rasterio.open(wind_file) as wind_src, rasterio.open(air_file) as air_src:
+        # Reproject germany back to raster CRS before returning
         germany = germany.to_crs(wind_src.crs)
         return (
             wind_src.read(1),
@@ -219,12 +219,11 @@ def create_overlay(data: np.ndarray):
 
 # ------------------ Create Tabs ------------------
 
-map_tab, finance_tab, price_tab, score_tab, table_tab = st.tabs([
+map_tab, finance_tab, price_tab, score_tab = st.tabs([
     "🌍 Wind Map",
     "📊 Financial Dashboard",
     "⚡ Energy Prices",
-    "📍 Site Score Map",
-    "📋 Site Score Table"
+    "📍 Site Score Map"
 ])
 
 
@@ -504,29 +503,23 @@ with price_tab:
     st.altair_chart(price_line, use_container_width=True)
 
 
+
 # ------------------ 4) Site Score Tab ------------------
 with score_tab:
-    st.markdown("## Site Suitability (Wind Speed × Air Density)")
-    site_score_data = wind_data * air_data
+    st.markdown("## Site Suitability (Precalculated)")
 
-    restricted_gdf = gpd.read_file(restricted_path).to_crs(crs)
-    projected_crs = restricted_gdf.estimate_utm_crs()
-    restricted_proj = restricted_gdf.to_crs(projected_crs)
+    # Download precomputed site score raster from Google Drive
+    SCORE_FILE_ID = "17EZxRok4zRmS7iX1Y1aR7Znh2RpnvLmd"
+    score_path = gdrive_download(SCORE_FILE_ID, ".tif")
 
-    restricted_proj["geometry"] = restricted_proj.centroid.buffer(4000)  # 4 km buffer
-    restricted_buffered = restricted_proj.to_crs(crs)
+    with rasterio.open(score_path) as src:
+        site_score_data = src.read(1)
+        score_transform = src.transform
+        score_crs = src.crs
 
-    shapes = [(geom, 1) for geom in restricted_buffered.geometry]
-    mask_array = rasterize(
-        shapes,
-        out_shape=site_score_data.shape,
-        transform=transform,
-        fill=0,
-        dtype="uint8"
-    )
-    site_score_data[mask_array == 1] = 0
-
+    site_score_data = np.nan_to_num(site_score_data, nan=0.0, posinf=0.0, neginf=0.0)
     score_img_path, score_vmin, score_vmax = create_overlay(site_score_data)
+
     site_map = folium.Map(
         location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()],
         zoom_start=6,
@@ -538,73 +531,20 @@ with score_tab:
         name="Site Score",
         image=score_img_path,
         bounds=[
-            [transform[5] + transform[4] * site_score_data.shape[0], transform[2]],
-            [transform[5], transform[2] + transform[0] * site_score_data.shape[1]]
+            [score_transform[5] + score_transform[4] * site_score_data.shape[0], score_transform[2]],
+            [score_transform[5], score_transform[2] + score_transform[0] * site_score_data.shape[1]]
         ],
         opacity=0.6
     ).add_to(site_map)
 
     colormap_score = linear.viridis.scale(score_vmin, score_vmax)
-    colormap_score.caption = "Site Score (Wind × Air Density, masked)"
+    colormap_score.caption = "Site Score (Precalculated)"
     colormap_score.add_to(site_map)
-
-    for i in range(0, site_score_data.shape[0], 150):
-        for j in range(0, site_score_data.shape[1], 150):
-            score = site_score_data[i, j]
-            if score <= 0:
-                continue
-            lat = transform[5] + i * transform[4]
-            lon = transform[2] + j * transform[0]
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=3,
-                color=None,
-                fill=True,
-                fill_opacity=0,
-                tooltip=f"{score:.2f}"
-            ).add_to(site_map)
 
     Draw(
         export=False,
         draw_options={"rectangle": {"shapeOptions": {"color": "red"}}}
     ).add_to(site_map)
 
-    st_folium(site_map, use_container_width=True, height=700)
+    st_folium(site_map, use_container_width=True, height=1000)
 
-
-# ------------------ 5) Site Score Table Tab ------------------
-with table_tab:
-    st.markdown("## Site Score Table (Sorted by Score)")
-
-    subsample = st.checkbox("🔍 Show subsample (same as map)", value=False)
-
-    coords = []
-    row_step = 150 if subsample else 1
-    col_step = 150 if subsample else 1
-
-    for i in range(0, site_score_data.shape[0], row_step):
-        for j in range(0, site_score_data.shape[1], col_step):
-            lat = transform[5] + i * transform[4]
-            lon = transform[2] + j * transform[0]
-            score = site_score_data[i, j]
-            if mask_array[i, j] == 1:
-                coords.append((lat, lon, "restricted"))
-            elif score > 0:
-                coords.append((lat, lon, round(score, 2)))
-
-    st.markdown(f"**Total Analyzed Sites:** {len(coords):,}")
-
-    site_df = pd.DataFrame(coords, columns=["Latitude", "Longitude", "Site Score"])
-    site_df_sorted = site_df.copy()
-    site_df_sorted["SortScore"] = pd.to_numeric(site_df_sorted["Site Score"], errors="coerce")
-    site_df_sorted = site_df_sorted.sort_values("SortScore", ascending=False).drop(columns="SortScore").reset_index(drop=True)
-
-    top_n = st.number_input("Show top N sites by score", min_value=10, max_value=10000, value=500)
-    st.dataframe(site_df_sorted.head(top_n))
-
-    st.download_button(
-        "📥 Download Site Scores (CSV)",
-        data=site_df_sorted.to_csv(index=False).encode("utf-8"),
-        file_name="site_scores_sorted.csv",
-        mime="text/csv"
-    )
