@@ -90,9 +90,9 @@ SHEET_ID = "1gbvX9IL_vkDDzl9feJvDzN-4oFMKWyNM"
 price_scenarios_df = load_price_scenarios_xlsx(SHEET_ID)
 
 
-# ------------------ Google Drive Download (Raster + GeoJSON) ------------------
+# ------------------ Google Drive Download (Raster) ------------------
 
-@st.cache_data(show_spinner="Downloading raster/geojson from Drive…")
+@st.cache_data(show_spinner="Downloading raster from Drive…")
 def gdrive_download(file_id: str, suffix: str) -> str:
     """
     Downloads a publicly‐shared Google Drive file by its file ID and returns
@@ -181,9 +181,8 @@ def load_rasters(wind_file: str, air_file: str):
     germany = gpd.read_file(
         "https://raw.githubusercontent.com/johan/world.geo.json/master/countries/DEU.geo.json"
     )
-    germany = germany.to_crs("EPSG:25832")  # Use UTM Zone 32N for Germany
     with rasterio.open(wind_file) as wind_src, rasterio.open(air_file) as air_src:
-        # Reproject germany back to raster CRS before returning
+        # Reproject germany to raster CRS before returning
         germany = germany.to_crs(wind_src.crs)
         return (
             wind_src.read(1),
@@ -193,9 +192,14 @@ def load_rasters(wind_file: str, air_file: str):
             wind_src.crs
         )
 
+
+# ------------------ Helper: Sanitize raster data ------------------
+def sanitize_raster(data):
+    return np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+
 wind_data, air_data, transform, germany, crs = load_rasters(wind_path, air_path)
-wind_data = np.nan_to_num(wind_data, nan=0.0, posinf=0.0, neginf=0.0)
-air_data  = np.nan_to_num(air_data,  nan=0.0, posinf=0.0, neginf=0.0)
+wind_data = sanitize_raster(wind_data)
+air_data  = sanitize_raster(air_data)
 
 
 # ------------------ Helper: Create a transparent PNG overlay from a raster ------------------
@@ -213,7 +217,7 @@ def create_overlay(data: np.ndarray):
 
     with NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         plt.savefig(tmp.name, bbox_inches="tight", pad_inches=0, dpi=150, transparent=True)
-        plt.close()
+        plt.close(fig)
         return tmp.name, float(vmin), float(vmax)
 
 
@@ -253,21 +257,6 @@ with map_tab:
     colormap.caption = "Wind Speed (m/s)"
     colormap.add_to(folium_map)
 
-    for i in range(0, wind_data.shape[0], 150):
-        for j in range(0, wind_data.shape[1], 150):
-            val = wind_data[i, j]
-            if val <= 0:
-                continue
-            lat = transform[5] + i * transform[4]
-            lon = transform[2] + j * transform[0]
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=3,
-                color=None,
-                fill=True,
-                fill_opacity=0,
-                tooltip=f"{val:.2f} m/s"
-            ).add_to(folium_map)
 
     Draw(
         export=False,
@@ -515,9 +504,9 @@ with score_tab:
     with rasterio.open(score_path) as src:
         site_score_data = src.read(1)
         score_transform = src.transform
-        score_crs = src.crs
+        # score_crs = src.crs  # Removed unnecessary variable
 
-    site_score_data = np.nan_to_num(site_score_data, nan=0.0, posinf=0.0, neginf=0.0)
+    site_score_data = sanitize_raster(site_score_data)
     score_img_path, score_vmin, score_vmax = create_overlay(site_score_data)
 
     site_map = folium.Map(
