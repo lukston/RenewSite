@@ -1,17 +1,21 @@
 from shapely.geometry import mapping
 import streamlit as st
+import folium
 import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.mask import mask
 from shapely.geometry import shape
+from branca.colormap import linear
+from streamlit_folium import st_folium
 import matplotlib.pyplot as plt
 import pandas as pd
 import altair as alt
+from folium.raster_layers import ImageOverlay
 from tempfile import NamedTemporaryFile
+from folium.plugins import Draw
 from io import BytesIO
 import requests
-import pydeck as pdk
 
 st.set_page_config(layout="wide")
 st.title("Wind-Project Dashboard")
@@ -229,47 +233,42 @@ map_tab, finance_tab, price_tab, score_tab = st.tabs([
 
 # ------------------ 1) Wind Map Tab ------------------
 with map_tab:
-    st.markdown("## Wind Map Visualization (Pydeck placeholder)")
-    # We cannot overlay raster RGB directly in pydeck, so simulate with a scatter or heatmap of wind speed
-    # Prepare coordinates and values
-    # Use raster transform to get coordinates
-    rows, cols = wind_data.shape
-    indices = np.indices((rows, cols))
-    xs, ys = indices[1].flatten(), indices[0].flatten()
-    # Convert raster indices to lon/lat
-    xs_geo, ys_geo = rasterio.transform.xy(transform, ys, xs)
-    wind_flat = wind_data.flatten()
-    df_map = pd.DataFrame({
-        "lon": xs_geo,
-        "lat": ys_geo,
-        "wind": wind_flat
-    })
-    # Filter to nonzero wind values for better visualization
-    df_map = df_map[df_map["wind"] > 0]
-    # Center map on Germany centroid
-    center = [germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()]
-    # Use HeatmapLayer as raster overlay is not available
-    wind_layer = pdk.Layer(
-        "HeatmapLayer",
-        data=df_map,
-        get_position='[lon, lat]',
-        get_weight="wind",
-        aggregation="MEAN",
-        radiusPixels=40,
+    st.markdown("## Draw a polygon to pick a site")
+    img_path, vmin, vmax = create_overlay(wind_data)
+
+    folium_map = folium.Map(
+        location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()],
+        zoom_start=6,
+        tiles="cartodbpositron",
+        height=700
     )
-    r = pdk.Deck(
-        layers=[wind_layer],
-        initial_view_state=pdk.ViewState(
-            latitude=center[0],
-            longitude=center[1],
-            zoom=6,
-            pitch=0,
-        ),
-        tooltip={"text": "Wind: {wind} m/s"},
-        map_style="carto-positron"
+
+    ImageOverlay(
+        name="Wind Speed Heatmap",
+        image=img_path,
+        bounds=[
+            [transform[5] + transform[4] * wind_data.shape[0], transform[2]],
+            [transform[5], transform[2] + transform[0] * wind_data.shape[1]]
+        ],
+        opacity=0.6
+    ).add_to(folium_map)
+
+    colormap = linear.viridis.scale(vmin, vmax)
+    colormap.caption = "Wind Speed (m/s)"
+    colormap.add_to(folium_map)
+
+
+    Draw(
+        export=False,
+        draw_options={"rectangle": {"shapeOptions": {"color": "blue"}}}
+    ).add_to(folium_map)
+
+    st.session_state.st_data = st_folium(
+        folium_map,
+        use_container_width=True,
+        height=700,
+        returned_objects=["last_active_drawing"]
     )
-    st.pydeck_chart(r, use_container_width=True)
-    st.info("Polygon drawing is not currently supported in this pydeck placeholder. (Previously available with Folium.)")
 
 
 # ------------------ 2) Financial Dashboard Tab ------------------
@@ -494,50 +493,47 @@ with price_tab:
 
 
 
-
 # ------------------ 4) Site Score Tab ------------------
 with score_tab:
     st.markdown("## Site Suitability (Precalculated)")
+
     # Download precomputed site score raster from Google Drive
     SCORE_FILE_ID = "17EZxRok4zRmS7iX1Y1aR7Znh2RpnvLmd"
     score_path = gdrive_download(SCORE_FILE_ID, ".tif")
+
     with rasterio.open(score_path) as src:
         site_score_data = src.read(1)
         score_transform = src.transform
+        # score_crs = src.crs  # Removed unnecessary variable
+
     site_score_data = sanitize_raster(site_score_data)
-    # Prepare coordinates and values
-    rows, cols = site_score_data.shape
-    indices = np.indices((rows, cols))
-    xs, ys = indices[1].flatten(), indices[0].flatten()
-    xs_geo, ys_geo = rasterio.transform.xy(score_transform, ys, xs)
-    score_flat = site_score_data.flatten()
-    df_score = pd.DataFrame({
-        "lon": xs_geo,
-        "lat": ys_geo,
-        "score": score_flat
-    })
-    df_score = df_score[df_score["score"] > 0]
-    center = [germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()]
-    # Use HeatmapLayer as raster overlay is not available
-    score_layer = pdk.Layer(
-        "HeatmapLayer",
-        data=df_score,
-        get_position='[lon, lat]',
-        get_weight="score",
-        aggregation="MEAN",
-        radiusPixels=40,
+    score_img_path, score_vmin, score_vmax = create_overlay(site_score_data)
+
+    site_map = folium.Map(
+        location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()],
+        zoom_start=6,
+        tiles="cartodbpositron",
+        height=1000
     )
-    r_score = pdk.Deck(
-        layers=[score_layer],
-        initial_view_state=pdk.ViewState(
-            latitude=center[0],
-            longitude=center[1],
-            zoom=6,
-            pitch=0,
-        ),
-        tooltip={"text": "Site Score: {score}"},
-        map_style="carto-positron"
-    )
-    st.pydeck_chart(r_score, use_container_width=True)
-    st.info("Polygon drawing and raster overlays are not currently supported in this pydeck placeholder. (Previously available with Folium.)")
+
+    ImageOverlay(
+        name="Site Score",
+        image=score_img_path,
+        bounds=[
+            [score_transform[5] + score_transform[4] * site_score_data.shape[0], score_transform[2]],
+            [score_transform[5], score_transform[2] + score_transform[0] * site_score_data.shape[1]]
+        ],
+        opacity=0.6
+    ).add_to(site_map)
+
+    colormap_score = linear.viridis.scale(score_vmin, score_vmax)
+    colormap_score.caption = "Site Score (Precalculated)"
+    colormap_score.add_to(site_map)
+
+    Draw(
+        export=False,
+        draw_options={"rectangle": {"shapeOptions": {"color": "red"}}}
+    ).add_to(site_map)
+
+    st_folium(site_map, use_container_width=True, height=1000)
 
