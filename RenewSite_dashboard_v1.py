@@ -239,7 +239,8 @@ with map_tab:
     folium_map = folium.Map(
         location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()],
         zoom_start=6,
-        tiles="cartodbpositron"
+        tiles="cartodbpositron",
+        height=700
     )
 
     ImageOverlay(
@@ -511,7 +512,8 @@ with score_tab:
     site_map = folium.Map(
         location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()],
         zoom_start=6,
-        tiles="cartodbpositron"
+        tiles="cartodbpositron",
+        height=1000
     )
 
     ImageOverlay(
