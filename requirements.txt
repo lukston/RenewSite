@@ -12,3 +12,4 @@ altair
 seaborn
 xlsxwriter
 openpyxl
+pydeck
