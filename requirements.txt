@@ -11,3 +11,4 @@ pandas
 altair
 seaborn
 xlsxwriter
+openpyxl
