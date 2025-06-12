@@ -223,12 +223,11 @@ def create_overlay(data: np.ndarray):
 
 # ------------------ Create Tabs ------------------
 
-selected_map = st.sidebar.selectbox(
-    "Select Map Type",
-    ["🌍 Wind Map", "📍 Site Score Map"]
-)
-
-
+map_tab, finance_tab, price_tab = st.tabs([
+    "🗺️ Site Score Map",
+    "📊 Financial Dashboard",
+    "⚡ Energy Prices"
+])
 
 # ------------------ Map Rendering Functions ------------------
 
@@ -240,42 +239,6 @@ def download_score_raster():
 
 score_path = download_score_raster()
 
-def render_wind_map():
-    st.markdown("## Draw a polygon to pick a site")
-    img_path, vmin, vmax = create_overlay(wind_data)
-
-    folium_map = folium.Map(
-        location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()],
-        zoom_start=6,
-        tiles="cartodbpositron",
-        height=700
-    )
-
-    ImageOverlay(
-        name="Wind Speed Heatmap",
-        image=img_path,
-        bounds=[
-            [transform[5] + transform[4] * wind_data.shape[0], transform[2]],
-            [transform[5], transform[2] + transform[0] * wind_data.shape[1]]
-        ],
-        opacity=0.6
-    ).add_to(folium_map)
-
-    colormap = linear.viridis.scale(vmin, vmax)
-    colormap.caption = "Wind Speed (m/s)"
-    colormap.add_to(folium_map)
-
-    Draw(
-        export=False,
-        draw_options={"rectangle": {"shapeOptions": {"color": "blue"}}}
-    ).add_to(folium_map)
-
-    st.session_state.st_data = st_folium(
-        folium_map,
-        use_container_width=True,
-        height=700,
-        returned_objects=["last_active_drawing"]
-    )
 
 def render_score_map():
     st.markdown("## Site Suitability (Precalculated)")
@@ -311,22 +274,13 @@ def render_score_map():
         draw_options={"rectangle": {"shapeOptions": {"color": "red"}}}
     ).add_to(site_map)
 
-    st_folium(site_map, use_container_width=True, height=1000)
+    draw_data = st_folium(site_map, use_container_width=True, height=1000)
+    st.session_state["st_data"] = draw_data
 
 
-if selected_map == "🌍 Wind Map":
-    st.cache_data.clear()
-    render_wind_map()
-elif selected_map == "📍 Site Score Map":
-    st.cache_data.clear()
+with map_tab:
     render_score_map()
 
-
-# ------------------ 2) Financial Dashboard Tab ------------------
-finance_tab, price_tab = st.tabs([
-    "📊 Financial Dashboard",
-    "⚡ Energy Prices"
-])
 
 with finance_tab:
     if "st_data" in st.session_state and st.session_state["st_data"].get("last_active_drawing"):
@@ -351,8 +305,15 @@ with finance_tab:
         with rasterio.open(air_path) as ad:
             avg_air_density = extract_mean_in_polygon(polygon, ad)
 
-        st.metric("Avg Wind Speed (m/s)", f"{avg_wind_speed:.2f}")
-        st.metric("Avg Air Density (kg/m³)", f"{avg_air_density:.2f}")
+        # Display selected area averages
+        st.markdown("### 📊 Selected Area Averages")
+        st.metric("Average Wind Speed (m/s)", f"{avg_wind_speed:.2f}")
+        st.metric("Average Air Density (kg/m³)", f"{avg_air_density:.2f}")
+
+        # Compute and display average site score for the selected polygon
+        with rasterio.open(score_path) as sc:
+            avg_site_score = extract_mean_in_polygon(polygon, sc)
+        st.metric("Average Site Score", f"{avg_site_score:.2f}")
 
         # Display the formula in Markdown (using a raw‐string so backslashes are preserved)
         st.markdown(
