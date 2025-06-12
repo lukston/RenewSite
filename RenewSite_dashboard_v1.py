@@ -223,16 +223,24 @@ def create_overlay(data: np.ndarray):
 
 # ------------------ Create Tabs ------------------
 
-map_tab, finance_tab, price_tab, score_tab = st.tabs([
-    "🌍 Wind Map",
-    "📊 Financial Dashboard",
-    "⚡ Energy Prices",
-    "📍 Site Score Map"
-])
+selected_map = st.sidebar.selectbox(
+    "Select Map Type",
+    ["🌍 Wind Map", "📍 Site Score Map"]
+)
 
 
-# ------------------ 1) Wind Map Tab ------------------
-with map_tab:
+
+# ------------------ Map Rendering Functions ------------------
+
+# Download site score raster at startup for availability
+@st.cache_data(show_spinner="Downloading raster from Drive…")
+def download_score_raster():
+    SCORE_FILE_ID = "17EZxRok4zRmS7iX1Y1aR7Znh2RpnvLmd"
+    return gdrive_download(SCORE_FILE_ID, ".tif")
+
+score_path = download_score_raster()
+
+def render_wind_map():
     st.markdown("## Draw a polygon to pick a site")
     img_path, vmin, vmax = create_overlay(wind_data)
 
@@ -257,7 +265,6 @@ with map_tab:
     colormap.caption = "Wind Speed (m/s)"
     colormap.add_to(folium_map)
 
-
     Draw(
         export=False,
         draw_options={"rectangle": {"shapeOptions": {"color": "blue"}}}
@@ -270,8 +277,57 @@ with map_tab:
         returned_objects=["last_active_drawing"]
     )
 
+def render_score_map():
+    st.markdown("## Site Suitability (Precalculated)")
+    with rasterio.open(score_path) as src:
+        site_score_data = src.read(1)
+        score_transform = src.transform
+    site_score_data = sanitize_raster(site_score_data)
+    score_img_path, score_vmin, score_vmax = create_overlay(site_score_data)
+
+    site_map = folium.Map(
+        location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()],
+        zoom_start=6,
+        tiles="cartodbpositron",
+        height=1000
+    )
+
+    ImageOverlay(
+        name="Site Score",
+        image=score_img_path,
+        bounds=[
+            [score_transform[5] + score_transform[4] * site_score_data.shape[0], score_transform[2]],
+            [score_transform[5], score_transform[2] + score_transform[0] * site_score_data.shape[1]]
+        ],
+        opacity=0.6
+    ).add_to(site_map)
+
+    colormap_score = linear.viridis.scale(score_vmin, score_vmax)
+    colormap_score.caption = "Site Score (Precalculated)"
+    colormap_score.add_to(site_map)
+
+    Draw(
+        export=False,
+        draw_options={"rectangle": {"shapeOptions": {"color": "red"}}}
+    ).add_to(site_map)
+
+    st_folium(site_map, use_container_width=True, height=1000)
+
+
+if selected_map == "🌍 Wind Map":
+    st.cache_data.clear()
+    render_wind_map()
+elif selected_map == "📍 Site Score Map":
+    st.cache_data.clear()
+    render_score_map()
+
 
 # ------------------ 2) Financial Dashboard Tab ------------------
+finance_tab, price_tab = st.tabs([
+    "📊 Financial Dashboard",
+    "⚡ Energy Prices"
+])
+
 with finance_tab:
     if "st_data" in st.session_state and st.session_state["st_data"].get("last_active_drawing"):
         polygon = st.session_state["st_data"]["last_active_drawing"]["geometry"]
@@ -462,7 +518,6 @@ with finance_tab:
         )
 
 
-# ------------------ 3) Energy Prices Tab ------------------
 with price_tab:
     st.markdown("## Energy-Price Forecasts (2024–2043) by Scenario")
     lifetime = 20
@@ -492,48 +547,4 @@ with price_tab:
     st.altair_chart(price_line, use_container_width=True)
 
 
-
-# ------------------ 4) Site Score Tab ------------------
-with score_tab:
-    st.markdown("## Site Suitability (Precalculated)")
-
-    # Download precomputed site score raster from Google Drive
-    SCORE_FILE_ID = "17EZxRok4zRmS7iX1Y1aR7Znh2RpnvLmd"
-    score_path = gdrive_download(SCORE_FILE_ID, ".tif")
-
-    with rasterio.open(score_path) as src:
-        site_score_data = src.read(1)
-        score_transform = src.transform
-        # score_crs = src.crs  # Removed unnecessary variable
-
-    site_score_data = sanitize_raster(site_score_data)
-    score_img_path, score_vmin, score_vmax = create_overlay(site_score_data)
-
-    site_map = folium.Map(
-        location=[germany.geometry.centroid.y.mean(), germany.geometry.centroid.x.mean()],
-        zoom_start=6,
-        tiles="cartodbpositron",
-        height=1000
-    )
-
-    ImageOverlay(
-        name="Site Score",
-        image=score_img_path,
-        bounds=[
-            [score_transform[5] + score_transform[4] * site_score_data.shape[0], score_transform[2]],
-            [score_transform[5], score_transform[2] + score_transform[0] * site_score_data.shape[1]]
-        ],
-        opacity=0.6
-    ).add_to(site_map)
-
-    colormap_score = linear.viridis.scale(score_vmin, score_vmax)
-    colormap_score.caption = "Site Score (Precalculated)"
-    colormap_score.add_to(site_map)
-
-    Draw(
-        export=False,
-        draw_options={"rectangle": {"shapeOptions": {"color": "red"}}}
-    ).add_to(site_map)
-
-    st_folium(site_map, use_container_width=True, height=1000)
 
