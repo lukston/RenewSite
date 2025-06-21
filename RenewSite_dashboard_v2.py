@@ -169,10 +169,11 @@ def create_overlay(data: np.ndarray):
 
 # ------------------ Tabs ------------------
 
-map_tab, finance_tab, site_tab, news_tab, lcoe_tab = st.tabs([
+map_tab, finance_tab, site_tab, news_tab, lcoe_tab, table_tab = st.tabs([
     "🌍 Wind Map", "📊 Financial Dashboard",
     "📍 Site Dashboard",
-    "📰 News", "🧮 LCOE Calculator"
+    "📰 News", "🧮 LCOE Calculator",
+    "📄 Site Score Table"
 ])
 
 # --- 1) Wind Map ---
@@ -773,7 +774,7 @@ with news_tab:
     except Exception as e:
         st.error(f"Error fetching news: {e}")
 
-# --- 6) LCOE Calculator Tab ---
+ # --- 6) LCOE Calculator Tab ---
 with lcoe_tab:
     st.markdown("## 🧮 Levelized Cost of Energy (LCOE) Calculator")
     st.write("This tool estimates LCOE for your selected site and compares to future energy prices.")
@@ -848,3 +849,37 @@ with lcoe_tab:
             color="Metric:N"
         ).properties(height=350, title="LCOE vs. Market Price")
         st.altair_chart(chart, use_container_width=True)
+
+
+# --- 7) Site Score Table Tab ---
+with table_tab:
+    st.markdown("## 📄 All Site Scores by Location")
+
+    # Re-load the correct score raster for extraction (full resolution, all cells)
+    SCORE_FILE_ID = "17EZxRok4zRmS7iX1Y1aR7Znh2RpnvLmd"
+    score_path = gdrive_download(SCORE_FILE_ID, ".tif")
+    with rasterio.open(score_path) as score_src:
+        score_data = np.nan_to_num(score_src.read(1), nan=0.0, posinf=0.0, neginf=0.0)
+        score_transform = score_src.transform
+
+    coords = []
+    values = []
+    rows, cols = score_data.shape
+    # Show full raster shape and cell count
+    for row in range(rows):
+        for col in range(cols):
+            score = score_data[row, col]
+            x, y = rasterio.transform.xy(score_transform, row, col, offset='center')
+            coords.append((y, x))  # lat, lon
+            values.append(score)
+
+    score_df = pd.DataFrame(coords, columns=["Latitude", "Longitude"])
+    score_df["Site Score"] = values
+    score_df = score_df.sort_values("Site Score", ascending=False)
+    # Warn if table is very large
+    if len(score_df) > 100_000:
+        st.warning(f"Warning: Displaying all {len(score_df):,} site scores may be slow in your browser.")
+        st.dataframe(score_df.head(100_000), use_container_width=True)
+        st.caption("Showing first 100,000 rows only.")
+    else:
+        st.dataframe(score_df, use_container_width=True)
