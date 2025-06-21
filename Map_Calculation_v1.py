@@ -31,7 +31,7 @@ print("Air stats:", np.min(air), np.max(air))
 print("Score (before mask):", np.min(site_score), np.max(site_score))
 restricted = gpd.read_file(restricted_path).to_crs(crs)
 restricted = restricted.to_crs(restricted.estimate_utm_crs())
-restricted["geometry"] = restricted.centroid.buffer(4000)
+restricted["geometry"] = restricted.centroid.buffer(2000)
 restricted = restricted.to_crs(crs)
 shapes = [(geom, 1) for geom in restricted.geometry]
 mask = rasterize(shapes, out_shape=site_score.shape, transform=transform, fill=0, dtype="uint8")
