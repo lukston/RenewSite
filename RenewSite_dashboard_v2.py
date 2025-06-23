@@ -17,20 +17,24 @@ from io import BytesIO
 import requests
 
 import plotly.graph_objects as go
+import plotly.express as px
 import feedparser  # pip install feedparser
+
+# ------------------ Global Color Sequence for Graphs ------------------
+color_sequence = ['#0BD0D9', '#007AC1', '#00AEEF', '#00D6C4', '#5CD65C', '#A8D608']
 
 st.set_page_config(layout="wide")
 # Updated logo with Google Drive thumbnail endpoint
 st.markdown(
-    """
-    <div style="display:flex; align-items:center; gap:1em; margin-bottom:1em;">
-        <img src="https://drive.google.com/thumbnail?id=1MjFnHO_Z2SWS3C6sLuBu69MM_CaIvyBA" alt="RenewSite Logo" style="height:60px;">
-        <h1 style="margin:0;">Wind-Project Dashboard</h1>
-    </div>
-    """,
-    unsafe_allow_html=True
+     """
+     <div style="display:flex; align-items:center; gap:1em; margin-bottom:1em;">
+         <img src="https://drive.google.com/thumbnail?id=1MjFnHO_Z2SWS3C6sLuBu69MM_CaIvyBA" alt="RenewSite Logo" style="height:60px;">
+         <h1 style="margin:0;"></h1>
+     </div>
+     """,
+     unsafe_allow_html=True
 )
-# st.title("Wind-Project Dashboard")
+st.title("Wind-Project Dashboard")
 
 # ------------------ Load & Clean Energy-Price Scenarios ------------------
 
@@ -252,7 +256,7 @@ with map_tab:
     # GeoJSON-Layer für Naturschutz
     folium.GeoJson(
         data=nsg.__geo_interface__,
-        name="Naturschutzgebiete",
+        name="Nature Reserves",
         style_function=lambda feature: {
             "color": "#FF0000",
             "fillColor": "#FF0000",
@@ -624,11 +628,11 @@ with finance_tab:
         })
         fcfe_chart = (
             alt.Chart(fcfe_df)
-            .mark_bar(color="orange")
+            .mark_bar(color=color_sequence[0])
             .encode(x="Year:O", y=alt.Y("Discounted FCFE (€):Q", title="Discounted FCFE (€)"))
             +
             alt.Chart(fcfe_df)
-            .mark_line(point=True, color="blue")
+            .mark_line(point=True, color=color_sequence[1])
             .encode(x="Year:O", y=alt.Y("Cumulative Discounted FCFE (€):Q", title="Cumulative Discounted FCFE (€)", axis=alt.Axis(orient="right")))
         )
         st.altair_chart(fcfe_chart.resolve_scale(y="independent").properties(height=350, title="Equity Cashflow DCF"), use_container_width=True)
@@ -687,7 +691,12 @@ with finance_tab:
         st.markdown("### Financing Structure")
         pie_labels = ["Debt", "Equity"]
         pie_values = [debt_amt, equity_amt]
-        fig = go.Figure(data=[go.Pie(labels=pie_labels, values=pie_values, hole=0.45, marker=dict(line=dict(color='#FFF', width=2)))])
+        fig = go.Figure(data=[go.Pie(
+            labels=pie_labels,
+            values=pie_values,
+            hole=0.45,
+            marker=dict(colors=color_sequence[:2], line=dict(color='#FFF', width=2))
+        )])
         fig.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=350, showlegend=True)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -701,9 +710,14 @@ with finance_tab:
     )
     price_df["YearIndex"] = price_df["Year"].astype(int) - 2024
     chart = (
-        alt.Chart(price_df).mark_line(point=True)
-           .encode(x="YearIndex:O", y="Price:Q", color="Scenario:N")
-           .properties(height=300, title="Energy Prices")
+        alt.Chart(price_df)
+        .mark_line(point=True)
+        .encode(
+            x="YearIndex:O",
+            y="Price:Q",
+            color=alt.Color("Scenario:N", scale=alt.Scale(range=color_sequence))
+        )
+        .properties(height=300, title="Energy Prices")
     )
     st.altair_chart(chart, use_container_width=True)
 
@@ -840,14 +854,20 @@ with lcoe_tab:
             "LCOE (€/MWh)": [lcoe]*lifetime,
             "Price (€/MWh)": price_series
         })
-        chart = alt.Chart(df).transform_fold(
-            ["LCOE (€/MWh)", "Price (€/MWh)"],
-            as_=["Metric", "Value"]
-        ).mark_line(point=True).encode(
-            x="Year:O",
-            y="Value:Q",
-            color="Metric:N"
-        ).properties(height=350, title="LCOE vs. Market Price")
+        chart = (
+            alt.Chart(df)
+            .transform_fold(
+                ["LCOE (€/MWh)", "Price (€/MWh)"],
+                as_=["Metric", "Value"]
+            )
+            .mark_line(point=True)
+            .encode(
+                x="Year:O",
+                y="Value:Q",
+                color=alt.Color("Metric:N", scale=alt.Scale(range=color_sequence))
+            )
+            .properties(height=350, title="LCOE vs. Market Price")
+        )
         st.altair_chart(chart, use_container_width=True)
 
 
@@ -855,31 +875,19 @@ with lcoe_tab:
 with table_tab:
     st.markdown("## 📄 All Site Scores by Location")
 
-    # Re-load the correct score raster for extraction (full resolution, all cells)
-    SCORE_FILE_ID = "17EZxRok4zRmS7iX1Y1aR7Znh2RpnvLmd"
-    score_path = gdrive_download(SCORE_FILE_ID, ".tif")
-    with rasterio.open(score_path) as score_src:
-        score_data = np.nan_to_num(score_src.read(1), nan=0.0, posinf=0.0, neginf=0.0)
-        score_transform = score_src.transform
-
+    # Extract all non-zero site scores and their coordinates
     coords = []
     values = []
-    rows, cols = score_data.shape
-    # Show full raster shape and cell count
-    for row in range(rows):
-        for col in range(cols):
-            score = score_data[row, col]
-            x, y = rasterio.transform.xy(score_transform, row, col, offset='center')
-            coords.append((y, x))  # lat, lon
-            values.append(score)
+    for row in range(sd.shape[0]):
+        for col in range(sd.shape[1]):
+            score = sd[row, col]
+            if score > 0:
+                x, y = rasterio.transform.xy(score_transform, row, col, offset='center')
+                coords.append((y, x))  # lat, lon
+                values.append(score)
 
+    # Create DataFrame and display
     score_df = pd.DataFrame(coords, columns=["Latitude", "Longitude"])
     score_df["Site Score"] = values
     score_df = score_df.sort_values("Site Score", ascending=False)
-    # Warn if table is very large
-    if len(score_df) > 100_000:
-        st.warning(f"Warning: Displaying all {len(score_df):,} site scores may be slow in your browser.")
-        st.dataframe(score_df.head(100_000), use_container_width=True)
-        st.caption("Showing first 100,000 rows only.")
-    else:
-        st.dataframe(score_df, use_container_width=True)
+    st.dataframe(score_df, use_container_width=True)
