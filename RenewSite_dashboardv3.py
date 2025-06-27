@@ -938,4 +938,11 @@ with table_tab:
         score_df = pd.DataFrame(coords, columns=["Latitude", "Longitude"])
         score_df["Site Score"] = values
         score_df = score_df.sort_values("Site Score", ascending=False)
-        st.dataframe(score_df.reset_index(drop=True), use_container_width=True)
+        score_df["Map Link"] = score_df.apply(
+            lambda row: f"https://www.google.com/maps?q={row['Latitude']},{row['Longitude']}", axis=1
+        )
+        score_df["Map Link"] = score_df["Map Link"].apply(
+            lambda url: f'<a href="{url}" target="_blank">Open in Maps</a>'
+        )
+        st.markdown(score_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+        # st.dataframe(score_df.reset_index(drop=True), use_container_width=True)
