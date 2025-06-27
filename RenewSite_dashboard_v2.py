@@ -34,7 +34,6 @@ st.markdown(
      """,
      unsafe_allow_html=True
 )
-st.title("Wind-Project Dashboard")
 
 # ------------------ Load & Clean Energy-Price Scenarios ------------------
 
@@ -173,11 +172,13 @@ def create_overlay(data: np.ndarray):
 
 # ------------------ Tabs ------------------
 
-map_tab, finance_tab, site_tab, news_tab, lcoe_tab, table_tab = st.tabs([
-    "🌍 Wind Map", "📊 Financial Dashboard",
+map_tab, finance_tab, site_tab, lcoe_tab, table_tab, news_tab = st.tabs([
+    "🌍 Wind Map", 
+    "📊 Financial Dashboard",
     "📍 Site Dashboard",
-    "📰 News", "🧮 LCOE Calculator",
-    "📄 Site Score Table"
+    "📄 Site Score Table",
+    "🧮 LCOE Calculator",
+    "📰 News"
 ])
 
 # --- 1) Wind Map ---
@@ -873,21 +874,24 @@ with lcoe_tab:
 
 # --- 7) Site Score Table Tab ---
 with table_tab:
-    st.markdown("## 📄 All Site Scores by Location")
-
-    # Extract all non-zero site scores and their coordinates
-    coords = []
-    values = []
-    for row in range(sd.shape[0]):
-        for col in range(sd.shape[1]):
-            score = sd[row, col]
-            if score > 0:
-                x, y = rasterio.transform.xy(score_transform, row, col, offset='center')
-                coords.append((y, x))  # lat, lon
-                values.append(score)
-
-    # Create DataFrame and display
-    score_df = pd.DataFrame(coords, columns=["Latitude", "Longitude"])
-    score_df["Site Score"] = values
-    score_df = score_df.sort_values("Site Score", ascending=False)
-    st.dataframe(score_df, use_container_width=True)
+    st.markdown("## 📄 Site Scores in Selected Region")
+    show_table = st.checkbox("Show Site Score Table", value=False)
+    if show_table and st.session_state.get("st_data", {}).get("last_active_drawing"):
+        poly = st.session_state["st_data"]["last_active_drawing"]["geometry"]
+        with rasterio.open(score_path) as src:
+            geom = shape(poly)
+            gdf = gpd.GeoDataFrame(geometry=[geom], crs="EPSG:4326").to_crs(src.crs)
+            arr, tfm = mask(src, [mapping(gdf.geometry.iloc[0])], crop=True)
+            arr = arr[0]
+        coords, values = [], []
+        for row in range(arr.shape[0]):
+            for col in range(arr.shape[1]):
+                score = arr[row, col]
+                if score >= 0:
+                    x, y = rasterio.transform.xy(tfm, row, col, offset='center')
+                    coords.append((y, x))
+                    values.append(score)
+        score_df = pd.DataFrame(coords, columns=["Latitude", "Longitude"])
+        score_df["Site Score"] = values
+        score_df = score_df.sort_values("Site Score", ascending=False)
+        st.dataframe(score_df.reset_index(drop=True), use_container_width=True)
